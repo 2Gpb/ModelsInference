@@ -4,10 +4,22 @@ name: hw-realtime-inference
 
 services:
   triton:
-    # TODO: image — Triton 24.06 через зеркало NGC по digest (см. ЗАДАНИЕ.md, раздел 2),
-    #       command (tritonserver --model-repository=/models, загрузить
-    #       только модель варианта ${CV_MODEL}, метрики на :8002 вкл. GPU-метрики),
-    #       проброс GPU (deploy.resources.reservations.devices, driver nvidia).
+    image: nvcr.nju.edu.cn/nvidia/tritonserver@sha256:153d3158d96346bc50df7fa6e1c3a96d6dc638249072be20ebbbcae07b8505ca
+    command:
+      - tritonserver
+      - --model-repository=/models
+      - --model-control-mode=explicit
+      - --load-model=${CV_MODEL}
+      - --allow-metrics=true
+      - --allow-gpu-metrics=true
+      - --metrics-port=8002
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - ./model_repository:/models
     ports:
@@ -16,8 +28,19 @@ services:
     restart: unless-stopped
 
   vllm:
-    # TODO: image (vLLM — закрепите версию, не latest), command (--model,
-    #       --served-model-name ${LLM_MODEL}, --gpu-memory-utilization, --max-model-len), проброс GPU.
+    image: vllm/vllm-openai:v0.33.0
+    command:
+      - Qwen/Qwen2.5-1.5B-Instruct
+      - --served-model-name=${LLM_MODEL}
+      - --gpu-memory-utilization=0.5
+      - --max-model-len=4096
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     volumes:
@@ -27,8 +50,18 @@ services:
 
   gateway:
     build: ./gateway
-    # TODO: environment — JWT_SECRET (обязателен), CV_MODEL, TRITON_URL, VLLM_URL, адреса
-    #       метрик, GPU_NAME, данные студента. Порт наружу (внутри 8080).
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      CV_MODEL: ${CV_MODEL}
+      LLM_MODEL: ${LLM_MODEL}
+      STUDENT_NAME: ${STUDENT_NAME}
+      STUDENT_EMAIL: ${STUDENT_EMAIL}
+      GPU_NAME: ${GPU_NAME}
+      VERSION: ${VERSION:-1.0}
+      TRITON_URL: http://triton:8000
+      TRITON_METRICS_URL: http://triton:8002
+      VLLM_URL: http://vllm:8000
+      NODE_EXPORTER_URL: http://node-exporter:9100
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
     depends_on:
